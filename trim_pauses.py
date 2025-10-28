@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Trim pauses from video by detecting and cutting low-motion sequences.
-Usage: trim_pauses.py video.mp4 start_sec end_sec [--motion-threshold 5.0] [--min-pause 1.0] [--keep-pause 0.2]
+Usage: trim_pauses.py video.mp4 [start_sec end_sec] [--motion-threshold 5.0] [--min-pause 1.0] [--keep-pause 0.2]
 """
 import sys
 import cv2
@@ -16,16 +16,17 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  %(prog)s demo.mp4
   %(prog)s demo.mp4 4.25 50
   %(prog)s demo.mp4 0 60 --motion-threshold 8.0 --min-pause 2.0
   %(prog)s demo.mp4 10 30 --keep-pause 0.5 -o clean_demo.mp4
         """
     )
     parser.add_argument('video', help='Input video file (mp4)')
-    parser.add_argument('start', type=float, help='Start timestamp in seconds')
-    parser.add_argument('end', type=float, help='End timestamp in seconds')
-    parser.add_argument('--motion-threshold', '-m', type=float, default=5.0,
-                        help='Motion score threshold for detecting pauses (default: 5.0)')
+    parser.add_argument('start', nargs='?', type=float, help='Start timestamp in seconds (default: 0)')
+    parser.add_argument('end', nargs='?', type=float, help='End timestamp in seconds (default: video duration)')
+    parser.add_argument('--motion-threshold', '-m', type=float, default=0.02,
+                        help='Motion score threshold for detecting pauses (default: 0.02)')
     parser.add_argument('--min-pause', '-p', type=float, default=1.0,
                         help='Minimum pause duration in seconds to trim (default: 1.0)')
     parser.add_argument('--keep-pause', '-k', type=float, default=0.2,
@@ -34,6 +35,14 @@ Examples:
     parser.add_argument('--preview', action='store_true',
                         help='Preview pause detection without processing')
     return parser.parse_args()
+
+def get_video_duration(video_path):
+    """Get the duration of a video in seconds."""
+    cap = cv2.VideoCapture(str(video_path))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    return total_frames / fps if fps > 0 else 0
 
 def frame_motion_score(frame1, frame2):
     """Calculate motion score between two frames using mean absolute difference."""
@@ -106,7 +115,7 @@ def print_motion_statistics(scores, current_threshold):
     labels = ['0-0.00005', '0.00005-0.0001', '0.0001-0.0005', '0.0005-0.001', '0.001-0.005', '0.005-0.01', '0.01-0.05', '0.05-0.1', '0.1-0.5', '0.5-1.0', '1.0+']
     hist, _ = np.histogram(scores_array, bins=bins)
     
-    for label, count in zip(labels, hist):
+    for label, count in zip(labels, hist):  
         pct = 100 * count / len(scores)
         bar_width = int(pct / 2)
         bar = '█' * bar_width
@@ -179,11 +188,15 @@ def main():
         print(f"Error: Video file not found: {video_path}")
         sys.exit(1)
     
+    # Set default start and end times if not provided
+    start_time = args.start if args.start is not None else 0.0
+    end_time = args.end if args.end is not None else get_video_duration(video_path)
+    
     print(f"Video: {video_path.name}")
-    print(f"Time range: {args.start}s - {args.end}s")
+    print(f"Time range: {start_time}s - {end_time}s")
     print(f"Motion threshold: {args.motion_threshold}")
     
-    scores, fps, start_frame = analyze_motion(video_path, args.start, args.end)
+    scores, fps, start_frame = analyze_motion(video_path, start_time, end_time)
     
     print_motion_statistics(scores, args.motion_threshold)
     
@@ -207,7 +220,7 @@ def main():
     
     print(f"\nTotal pause time: {total_pause_time:.2f}s")
     print(f"Will trim: {trimmed_time:.2f}s")
-    print(f"Result: {(args.end - args.start) - trimmed_time:.2f}s")
+    print(f"Result: {(end_time - start_time) - trimmed_time:.2f}s")
     
     if args.preview:
         print("\nPreview mode - no video processing")
